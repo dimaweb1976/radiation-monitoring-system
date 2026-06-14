@@ -276,6 +276,8 @@ async function loadDetectors() {
 
         select.appendChild(option);
     });
+
+    select.onchange = loadChartBySelectedDetector;
 }
 
 async function addMeasurement(event) {
@@ -346,7 +348,7 @@ async function loadMeasurements() {
         document.getElementById("lastUpdate").textContent =
             new Date().toLocaleTimeString();
 
-        drawChart(rows);
+        //drawChart(rows);
 
         status.textContent = "Записей: " + rows.length;
 
@@ -357,17 +359,18 @@ async function loadMeasurements() {
 }
 
 function drawChart(rows) {
-    const chartRows = [...rows].reverse().slice(-30);
+    const chartRows = [...rows].reverse();
 
     const labels = chartRows.map(r => {
-        const station = r.detector?.station?.name ?? "";
-        const detector = r.detector?.name ?? "unknown";
-        const time = r.createdAt ? r.createdAt.substring(11, 19) : "#" + r.id;
-
-        return `${station} / ${detector} ${time}`;
+        return r.createdAt ? r.createdAt.substring(11, 19) : "#" + r.id;
     });
 
     const values = chartRows.map(r => Number(r.value));
+
+    const detectorName =
+        chartRows.length > 0
+            ? chartRows[0].detector?.name ?? "Detector"
+            : "Detector";
 
     const ctx = document.getElementById("chart");
 
@@ -380,7 +383,7 @@ function drawChart(rows) {
         data: {
             labels: labels,
             datasets: [{
-                label: "Radiation",
+                label: detectorName,
                 data: values,
                 tension: 0.2
             }]
@@ -394,6 +397,19 @@ function drawChart(rows) {
             }
         }
     });
+}
+
+async function loadChartBySelectedDetector() {
+    const detectorId = document.getElementById("detectorId").value;
+
+    if (!detectorId) {
+        return;
+    }
+
+    const response = await fetch(`/api/measurements/detector/${detectorId}`);
+    const rows = await response.json();
+
+    drawChart(rows);
 }
 
 async function loadHeartbeat() {
@@ -445,11 +461,14 @@ async function loadEvents() {
 }
 
 async function refreshAll() {
-    await loadStations();
-    await loadDetectors();
-    await loadMeasurements();
-    await loadHeartbeat();
-    await loadEvents();
+    await Promise.allSettled([
+        loadStations(),
+        loadDetectors(),
+        loadMeasurements(),
+        loadHeartbeat(),
+        loadEvents(),
+        loadChartBySelectedDetector()
+    ]);
 }
 
 initMap();
