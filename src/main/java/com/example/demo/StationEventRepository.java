@@ -5,5 +5,6 @@ import java.util.List;
 
 public interface StationEventRepository extends JpaRepository<StationEvent, Long> {
 
-    List<StationEvent> findTop50ByOrderByCreatedAtDesc();
+    List<StationEvent> findTop20ByOrderByCreatedAtDesc();
+
 }

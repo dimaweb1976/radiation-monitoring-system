@@ -20,12 +20,12 @@ public class StationEventController {
 
     @GetMapping
     public List<StationEvent> getAll() {
-        return eventRepository.findTop50ByOrderByCreatedAtDesc();
+        return eventRepository.findTop20ByOrderByCreatedAtDesc();
     }
 
     @GetMapping("/latest")
     public List<StationEvent> latest() {
-        return eventRepository.findTop50ByOrderByCreatedAtDesc();
+        return eventRepository.findTop20ByOrderByCreatedAtDesc();
     }
 
     @PostMapping
