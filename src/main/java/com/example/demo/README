@@ -1,0 +1,40 @@
+Radiation Monitoring System
+
+Cloud-based SCADA and monitoring platform for radiation control networks.
+
+Technology Stack
+
+Backend:
+
+Java 21
+Spring Boot 3.5
+Spring Data JPA
+PostgreSQL 16
+
+Frontend:
+
+HTML5
+JavaScript
+Leaflet
+Chart.js
+
+Infrastructure:
+
+Google Cloud VM
+Ubuntu 24.04 LTS
+Nginx
+Let's Encrypt
+GitHub
+
+Features:
+
+Radiation measurements
+Detector management
+Station monitoring
+Heartbeat monitoring
+Event generation
+Interactive map
+HTTPS secured access
+
+Production URL:
+https://radiation.dimlb.id.lv
