@@ -162,6 +162,8 @@ input, select, button {
 <tbody id="eventData"></tbody>
 </table>
 
+<h2>Последние 100 измерений датчиков</h2>
+
 <table>
 <thead>
 <tr>
@@ -182,6 +184,42 @@ let chart = null;
 let map = null;
 let markers = [];
 
+function getStationMapColor(station) {
+    if (!station.lastSeen) {
+        return "red";
+    }
+
+    const lastSeen = new Date(station.lastSeen + "Z");
+    const now = new Date();
+    const diffSeconds = (now - lastSeen) / 1000;
+
+    if (diffSeconds > 300) {
+        return "red";
+    }
+
+    if (diffSeconds > 60) {
+        return "orange";
+    }
+
+    return "green";
+}
+
+function createStationIcon(color) {
+    return L.divIcon({
+        className: "station-marker",
+        html: `<div style="
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: ${color};
+            border: 3px solid white;
+            box-shadow: 0 0 6px #333;
+        "></div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+    });
+}
+
 function getState(value) {
     if (value >= 1.0) {
         return { text: "ALARM", cls: "alarm" };
@@ -199,7 +237,7 @@ function getStationState(station) {
         return { text: "OFFLINE", color: "red", cls: "offline" };
     }
 
-    const lastSeen = new Date(station.lastSeen);
+    const lastSeen = new Date(station.lastSeen + "Z");
     const now = new Date();
     const diffSeconds = (now - lastSeen) / 1000;
 
@@ -237,26 +275,38 @@ async function loadStations() {
         }
 
         const state = getStationState(station);
+        const color = getStationMapColor(station);
+        
+        // const marker = L.circleMarker(
+        //    [Number(station.latitude), Number(station.longitude)],
+        //    {
+        //        radius: 10,
+        //        color: state.color,
+        //        fillColor: state.color,
+        //        fillOpacity: 0.8
+        //     }
+        // ).addTo(map);
 
-        const marker = L.circleMarker(
-            [Number(station.latitude), Number(station.longitude)],
-            {
-                radius: 10,
-                color: state.color,
-                fillColor: state.color,
-                fillOpacity: 0.8
-            }
-        ).addTo(map);
 
-        marker.bindPopup(`
-            <b>${station.name}</b><br>
-            Location: ${station.location ?? ""}<br>
-            IP: ${station.ipAddress ?? ""}<br>
-            Status: <b>${state.text}</b><br>
-            Last seen: ${station.lastSeen ?? "-"}
-        `);
+       // marker.bindPopup(`
+       //     <b>${station.name}</b><br>
+       //     Location: ${station.location ?? ""}<br>
+       //     IP: ${station.ipAddress ?? ""}<br>
+       //     Status: <b>${state.text}</b><br>
+       //     Last seen: ${station.lastSeen ?? "-"}
+       // `);
 
-        markers.push(marker);
+      const marker = L.marker([station.latitude, station.longitude], {
+        icon: createStationIcon(color)
+      })
+      .addTo(map)
+      .bindPopup(`
+        <b>${station.name}</b><br>
+        Status: ${color.toUpperCase()}<br>
+        Last seen: ${station.lastSeen || "never"}
+      `);
+  
+      markers.push(marker);
     });
 }
 
