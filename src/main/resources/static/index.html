@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Radiation Monitor Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+}
+
+h1, h2 {
+    color: #333;
+}
+
+.cards {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.card {
+    border: 1px solid #ccc;
+    padding: 12px;
+    min-width: 180px;
+    background: #f8f8f8;
+}
+
+#map {
+    height: 450px;
+    width: 100%;
+    border: 1px solid #ccc;
+    margin-bottom: 25px;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+th, td {
+    border: 1px solid #ccc;
+    padding: 8px;
+}
+
+th {
+    background: #eee;
+}
+
+.ok {
+    color: green;
+    font-weight: bold;
+}
+
+.warn {
+    color: orange;
+    font-weight: bold;
+}
+
+.alarm {
+    color: red;
+    font-weight: bold;
+}
+
+.offline {
+    color: red;
+    font-weight: bold;
+}
+
+.online {
+    color: green;
+    font-weight: bold;
+}
+
+#chartContainer {
+    margin-top: 25px;
+    margin-bottom: 25px;
+}
+
+form {
+    margin-bottom: 20px;
+}
+
+input, select, button {
+    padding: 6px;
+    margin-right: 5px;
+}
+</style>
+
+</head>
+<body>
+
+<h1>Radiation Monitor Dashboard</h1>
+
+<div class="cards">
+    <div class="card">Всего записей<br><b id="totalCount">0</b></div>
+    <div class="card">Тревог<br><b id="alarmCount">0</b></div>
+    <div class="card">Станций<br><b id="stationCount">0</b></div>
+    <div class="card">Последнее значение<br><b id="lastValue">-</b></div>
+    <div class="card">Обновлено<br><b id="lastUpdate">-</b></div>
+</div>
+
+<h2>Карта станций</h2>
+<div id="map"></div>
+
+<form onsubmit="addMeasurement(event)">
+    <select id="detectorId"></select>
+
+    <input
+        id="value"
+        type="number"
+        step="0.001"
+        placeholder="Значение"
+        required>
+
+    <button type="submit">Добавить</button>
+</form>
+
+<button onclick="refreshAll()">Обновить</button>
+
+<p id="status">Загрузка...</p>
+
+<div id="chartContainer">
+    <canvas id="chart"></canvas>
+</div>
+
+<h2>Техническое состояние Raspberry Pi</h2>
+
+<table>
+<thead>
+<tr>
+    <th>Станция</th>
+    <th>Статус</th>
+    <th>CPU °C</th>
+    <th>Свободно GB</th>
+    <th>RAM %</th>
+    <th>Последняя связь</th>
+</tr>
+</thead>
+<tbody id="heartbeatData"></tbody>
+</table>
+
+<h2>История событий станции</h2>
+
+<table>
+<thead>
+<tr>
+    <th>ID</th>
+    <th>Станция</th>
+    <th>Тип</th>
+    <th>Сообщение</th>
+    <th>Время</th>
+</tr>
+</thead>
+<tbody id="eventData"></tbody>
+</table>
+
+<table>
+<thead>
+<tr>
+    <th>ID</th>
+    <th>Станция</th>
+    <th>Детектор</th>
+    <th>Значение</th>
+    <th>Время</th>
+    <th>Статус</th>
+</tr>
+</thead>
+<tbody id="data"></tbody>
+</table>
+
+
+<script>
+let chart = null;
+let map = null;
+let markers = [];
+
+function getState(value) {
+    if (value >= 1.0) {
+        return { text: "ALARM", cls: "alarm" };
+    }
+
+    if (value >= 0.5) {
+        return { text: "WARNING", cls: "warn" };
+    }
+
+    return { text: "OK", cls: "ok" };
+}
+
+function getStationState(station) {
+    if (!station.lastSeen) {
+        return { text: "OFFLINE", color: "red", cls: "offline" };
+    }
+
+    const lastSeen = new Date(station.lastSeen);
+    const now = new Date();
+    const diffSeconds = (now - lastSeen) / 1000;
+
+    if (diffSeconds > 900) {
+        return { text: "OFFLINE", color: "red", cls: "offline" };
+    }
+
+    if (diffSeconds > 300) {
+        return { text: "WARNING", color: "orange", cls: "warn" };
+    }
+
+    return { text: "ONLINE", color: "green", cls: "online" };
+}
+
+function initMap() {
+    map = L.map("map").setView([56.95, 24.10], 7);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap"
+    }).addTo(map);
+}
+
+async function loadStations() {
+    const response = await fetch("/api/stations");
+    const stations = await response.json();
+
+    document.getElementById("stationCount").textContent = stations.length;
+
+    markers.forEach(marker => map.removeLayer(marker));
+    markers = [];
+
+    stations.forEach(station => {
+        if (!station.latitude || !station.longitude) {
+            return;
+        }
+
+        const state = getStationState(station);
+
+        const marker = L.circleMarker(
+            [Number(station.latitude), Number(station.longitude)],
+            {
+                radius: 10,
+                color: state.color,
+                fillColor: state.color,
+                fillOpacity: 0.8
+            }
+        ).addTo(map);
+
+        marker.bindPopup(`
+            <b>${station.name}</b><br>
+            Location: ${station.location ?? ""}<br>
+            IP: ${station.ipAddress ?? ""}<br>
+            Status: <b>${state.text}</b><br>
+            Last seen: ${station.lastSeen ?? "-"}
+        `);
+
+        markers.push(marker);
+    });
+}
+
+async function loadDetectors() {
+    const response = await fetch("/api/detectors");
+    const detectors = await response.json();
+
+    const select = document.getElementById("detectorId");
+    select.innerHTML = "";
+
+    detectors.forEach(detector => {
+        const stationName = detector.station?.name ?? "No station";
+
+        const option = document.createElement("option");
+        option.value = detector.id;
+        option.textContent = `${stationName} / ${detector.name}`;
+
+        select.appendChild(option);
+    });
+}
+
+async function addMeasurement(event) {
+    event.preventDefault();
+
+    const detectorId = Number(document.getElementById("detectorId").value);
+    const value = Number(document.getElementById("value").value);
+
+    await fetch("/api/measurements", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            detector: {
+                id: detectorId
+            },
+            value: value
+        })
+    });
+
+    document.getElementById("value").value = "";
+    await refreshAll();
+}
+
+async function loadMeasurements() {
+    const status = document.getElementById("status");
+    const tbody = document.getElementById("data");
+
+    status.textContent = "Загрузка...";
+
+    try {
+        //const response = await fetch("/api/measurements");
+       const response = await fetch("/api/measurements/latest");
+
+        const rows = await response.json();
+
+        tbody.innerHTML = "";
+
+        let alarmCount = 0;
+
+        rows.forEach(row => {
+            const value = Number(row.value);
+            const state = getState(value);
+
+            if (state.text === "ALARM") {
+                alarmCount++;
+            }
+
+            const tr = document.createElement("tr");
+
+            tr.innerHTML = `
+                <td>${row.id}</td>
+                <td>${row.detector?.station?.name ?? ""}</td>
+                <td>${row.detector?.name ?? ""}</td>
+                <td>${value.toFixed(3)}</td>
+                <td>${row.createdAt ?? ""}</td>
+                <td class="${state.cls}">${state.text}</td>
+            `;
+
+            tbody.appendChild(tr);
+        });
+
+        document.getElementById("totalCount").textContent = rows.length;
+        document.getElementById("alarmCount").textContent = alarmCount;
+        document.getElementById("lastValue").textContent =
+            rows.length ? Number(rows[0].value).toFixed(3) : "-";
+        document.getElementById("lastUpdate").textContent =
+            new Date().toLocaleTimeString();
+
+        drawChart(rows);
+
+        status.textContent = "Записей: " + rows.length;
+
+    } catch (e) {
+        console.error(e);
+        status.textContent = "Ошибка загрузки данных";
+    }
+}
+
+function drawChart(rows) {
+    const chartRows = [...rows].reverse().slice(-30);
+
+    const labels = chartRows.map(r => {
+        const station = r.detector?.station?.name ?? "";
+        const detector = r.detector?.name ?? "unknown";
+        const time = r.createdAt ? r.createdAt.substring(11, 19) : "#" + r.id;
+
+        return `${station} / ${detector} ${time}`;
+    });
+
+    const values = chartRows.map(r => Number(r.value));
+
+    const ctx = document.getElementById("chart");
+
+    if (chart) {
+        chart.destroy();
+    }
+
+    chart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels: labels,
+            datasets: [{
+                label: "Radiation",
+                data: values,
+                tension: 0.2
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+}
+
+async function loadHeartbeat() {
+    const response = await fetch("/api/heartbeat/latest");
+    const rows = await response.json();
+
+    const tbody = document.getElementById("heartbeatData");
+    tbody.innerHTML = "";
+
+    rows.forEach(row => {
+        const station = row.station;
+        const state = getStationState(station);
+
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+            <td>${station.name}</td>
+            <td class="${state.cls}">${state.text}</td>
+            <td>${Number(row.cpuTemp).toFixed(1)}</td>
+            <td>${Number(row.freeDiskGb).toFixed(1)}</td>
+            <td>${Number(row.memoryPercent).toFixed(1)}</td>
+            <td>${row.createdAt ?? ""}</td>
+        `;
+
+        tbody.appendChild(tr);
+    });
+}
+
+async function loadEvents() {
+    const response = await fetch("/api/events/latest");
+    const rows = await response.json();
+
+    const tbody = document.getElementById("eventData");
+    tbody.innerHTML = "";
+
+    rows.forEach(row => {
+        const tr = document.createElement("tr");
+
+        tr.innerHTML = `
+            <td>${row.id}</td>
+            <td>${row.station?.name ?? ""}</td>
+            <td>${row.eventType ?? ""}</td>
+            <td>${row.message ?? ""}</td>
+            <td>${row.createdAt ?? ""}</td>
+        `;
+
+        tbody.appendChild(tr);
+    });
+}
+
+async function refreshAll() {
+    await loadStations();
+    await loadDetectors();
+    await loadMeasurements();
+    await loadHeartbeat();
+    await loadEvents();
+}
+
+initMap();
+refreshAll();
+
+setInterval(refreshAll, 5000);
+</script>
+
+</body>
+</html>
