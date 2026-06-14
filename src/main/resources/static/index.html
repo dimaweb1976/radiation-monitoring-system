@@ -203,7 +203,7 @@ function getStationState(station) {
     const now = new Date();
     const diffSeconds = (now - lastSeen) / 1000;
 
-    if (diffSeconds > 900) {
+    if (diffSeconds > 600) {
         return { text: "OFFLINE", color: "red", cls: "offline" };
     }
 
