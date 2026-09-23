@@ -103,25 +103,15 @@ input, select, button {
     <div class="card">Всего записей<br><b id="totalCount">0</b></div>
     <div class="card">Тревог<br><b id="alarmCount">0</b></div>
     <div class="card">Станций<br><b id="stationCount">0</b></div>
-    <div class="card">Последнее значение<br><b id="lastValue">-</b></div>
+    <div class="card">Последнее значение (µSv/h)<br><b id="lastValue">-</b></div>
     <div class="card">Обновлено<br><b id="lastUpdate">-</b></div>
 </div>
 
 <h2>Карта станций</h2>
 <div id="map"></div>
 
-<form onsubmit="addMeasurement(event)">
-    <select id="detectorId"></select>
-
-    <input
-        id="value"
-        type="number"
-        step="0.001"
-        placeholder="Значение"
-        required>
-
-    <button type="submit">Добавить</button>
-</form>
+<label for="detectorId">График детектора:</label>
+<select id="detectorId"></select>
 
 <button onclick="refreshAll()">Обновить</button>
 
@@ -170,7 +160,7 @@ input, select, button {
     <th>ID</th>
     <th>Станция</th>
     <th>Детектор</th>
-    <th>Значение</th>
+    <th>Значение (µSv/h)</th>
     <th>Время</th>
     <th>Статус</th>
 </tr>
@@ -184,24 +174,14 @@ let chart = null;
 let map = null;
 let markers = [];
 
+function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, c => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    })[c]);
+}
+
 function getStationMapColor(station) {
-    if (!station.lastSeen) {
-        return "red";
-    }
-
-    const lastSeen = new Date(station.lastSeen + "Z");
-    const now = new Date();
-    const diffSeconds = (now - lastSeen) / 1000;
-
-    if (diffSeconds > 300) {
-        return "red";
-    }
-
-    if (diffSeconds > 60) {
-        return "orange";
-    }
-
-    return "green";
+    return getStationState(station).color;
 }
 
 function createStationIcon(color) {
@@ -233,23 +213,9 @@ function getState(value) {
 }
 
 function getStationState(station) {
-    if (!station.lastSeen) {
-        return { text: "OFFLINE", color: "red", cls: "offline" };
-    }
-
-    const lastSeen = new Date(station.lastSeen + "Z");
-    const now = new Date();
-    const diffSeconds = (now - lastSeen) / 1000;
-
-    if (diffSeconds > 600) {
-        return { text: "OFFLINE", color: "red", cls: "offline" };
-    }
-
-    if (diffSeconds > 300) {
-        return { text: "WARNING", color: "orange", cls: "warn" };
-    }
-
-    return { text: "ONLINE", color: "green", cls: "online" };
+    if (station?.status === "ONLINE") return { text: "ONLINE", color: "green", cls: "online" };
+    if (station?.status === "WARNING") return { text: "WARNING", color: "orange", cls: "warn" };
+    return { text: "OFFLINE", color: "red", cls: "offline" };
 }
 
 function initMap() {
@@ -270,7 +236,7 @@ async function loadStations() {
     markers = [];
 
     stations.forEach(station => {
-        if (!station.latitude || !station.longitude) {
+        if (station.latitude == null || station.longitude == null) {
             return;
         }
 
@@ -301,9 +267,9 @@ async function loadStations() {
       })
       .addTo(map)
       .bindPopup(`
-        <b>${station.name}</b><br>
-        Status: ${color.toUpperCase()}<br>
-        Last seen: ${station.lastSeen || "never"}
+         <b>${escapeHtml(station.name)}</b><br>
+         Status: ${state.text}<br>
+         Last seen: ${escapeHtml(station.lastSeen || "never")}
       `);
   
       markers.push(marker);
@@ -315,6 +281,7 @@ async function loadDetectors() {
     const detectors = await response.json();
 
     const select = document.getElementById("detectorId");
+    const selected = select.value;
     select.innerHTML = "";
 
     detectors.forEach(detector => {
@@ -328,29 +295,7 @@ async function loadDetectors() {
     });
 
     select.onchange = loadChartBySelectedDetector;
-}
-
-async function addMeasurement(event) {
-    event.preventDefault();
-
-    const detectorId = Number(document.getElementById("detectorId").value);
-    const value = Number(document.getElementById("value").value);
-
-    await fetch("/api/measurements", {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            detector: {
-                id: detectorId
-            },
-            value: value
-        })
-    });
-
-    document.getElementById("value").value = "";
-    await refreshAll();
+    if ([...select.options].some(option => option.value === selected)) select.value = selected;
 }
 
 async function loadMeasurements() {
@@ -381,10 +326,10 @@ async function loadMeasurements() {
 
             tr.innerHTML = `
                 <td>${row.id}</td>
-                <td>${row.detector?.station?.name ?? ""}</td>
-                <td>${row.detector?.name ?? ""}</td>
+                <td>${escapeHtml(row.detector?.station?.name)}</td>
+                <td>${escapeHtml(row.detector?.name)}</td>
                 <td>${value.toFixed(3)}</td>
-                <td>${row.createdAt ?? ""}</td>
+                <td>${escapeHtml(row.createdAt)}</td>
                 <td class="${state.cls}">${state.text}</td>
             `;
 
@@ -463,25 +408,29 @@ async function loadChartBySelectedDetector() {
 }
 
 async function loadHeartbeat() {
-    const response = await fetch("/api/heartbeat/latest");
-    const rows = await response.json();
+    const [heartbeatResponse, stationsResponse] = await Promise.all([
+        fetch("/api/heartbeat/latest"), fetch("/api/stations")
+    ]);
+    const rows = await heartbeatResponse.json();
+    const stations = await stationsResponse.json();
+    const latestByStation = new Map(rows.map(row => [row.station?.id, row]));
 
     const tbody = document.getElementById("heartbeatData");
     tbody.innerHTML = "";
 
-    rows.forEach(row => {
-        const station = row.station;
+    stations.forEach(station => {
+        const row = latestByStation.get(station.id);
         const state = getStationState(station);
 
         const tr = document.createElement("tr");
 
         tr.innerHTML = `
-            <td>${station.name}</td>
+            <td>${escapeHtml(station.name)}</td>
             <td class="${state.cls}">${state.text}</td>
-            <td>${Number(row.cpuTemp).toFixed(1)}</td>
-            <td>${Number(row.freeDiskGb).toFixed(1)}</td>
-            <td>${Number(row.memoryPercent).toFixed(1)}</td>
-            <td>${row.createdAt ?? ""}</td>
+            <td>${row?.cpuTemp == null ? "-" : Number(row.cpuTemp).toFixed(1)}</td>
+            <td>${row?.freeDiskGb == null ? "-" : Number(row.freeDiskGb).toFixed(1)}</td>
+            <td>${row?.memoryPercent == null ? "-" : Number(row.memoryPercent).toFixed(1)}</td>
+            <td>${escapeHtml(station.lastSeen || "-")}</td>
         `;
 
         tbody.appendChild(tr);
@@ -500,10 +449,10 @@ async function loadEvents() {
 
         tr.innerHTML = `
             <td>${row.id}</td>
-            <td>${row.station?.name ?? ""}</td>
-            <td>${row.eventType ?? ""}</td>
-            <td>${row.message ?? ""}</td>
-            <td>${row.createdAt ?? ""}</td>
+            <td>${escapeHtml(row.station?.name)}</td>
+            <td>${escapeHtml(row.eventType)}</td>
+            <td>${escapeHtml(row.message)}</td>
+            <td>${escapeHtml(row.createdAt)}</td>
         `;
 
         tbody.appendChild(tr);
@@ -513,12 +462,12 @@ async function loadEvents() {
 async function refreshAll() {
     await Promise.allSettled([
         loadStations(),
-        loadDetectors(),
         loadMeasurements(),
         loadHeartbeat(),
         loadEvents(),
-        loadChartBySelectedDetector()
     ]);
+    await loadDetectors();
+    await loadChartBySelectedDetector();
 }
 
 initMap();
