@@ -8,14 +8,11 @@ import java.util.List;
 public class StationEventController {
 
     private final StationEventRepository eventRepository;
-    private final StationRepository stationRepository;
 
     public StationEventController(
-            StationEventRepository eventRepository,
-            StationRepository stationRepository
+            StationEventRepository eventRepository
     ) {
         this.eventRepository = eventRepository;
-        this.stationRepository = stationRepository;
     }
 
     @GetMapping
@@ -28,12 +25,4 @@ public class StationEventController {
         return eventRepository.findTop20ByOrderByCreatedAtDesc();
     }
 
-    @PostMapping
-    public StationEvent create(@RequestBody StationEvent event) {
-        Station station = stationRepository.findById(event.getStation().getId())
-                .orElseThrow();
-
-        event.setStation(station);
-        return eventRepository.save(event);
-    }
 }

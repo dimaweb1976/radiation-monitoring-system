@@ -1,6 +1,7 @@
 package com.example.demo;
 
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import java.util.List;
 
 @RestController
@@ -8,17 +9,14 @@ import java.util.List;
 public class MeasurementController {
 
     private final MeasurementRepository repository;
-    private final DetectorRepository detectorRepository;
-    private final EventService eventService;
+    private final MeasurementService measurementService;
 
     public MeasurementController(
             MeasurementRepository repository,
-            DetectorRepository detectorRepository,
-            EventService eventService
+            MeasurementService measurementService
     ) {
         this.repository = repository;
-        this.detectorRepository = detectorRepository;
-        this.eventService = eventService;
+        this.measurementService = measurementService;
     }
 
     @GetMapping
@@ -40,41 +38,9 @@ public class MeasurementController {
         return repository.findTop500ByDetectorIdOrderByIdDesc(id);
     }
     @PostMapping
-    public Measurement create(@RequestBody Measurement measurement) {
-
-        if (measurement.getDetector() != null &&
-                measurement.getDetector().getId() != null) {
-
-            Detector detector = detectorRepository
-                    .findById(measurement.getDetector().getId())
-                    .orElseThrow();
-
-            measurement.setDetector(detector);
-        }
-
-        Measurement saved = repository.save(measurement);
-
-        if (saved.getValue() != null &&
-                saved.getDetector() != null &&
-                saved.getDetector().getStation() != null) {
-
-            double value = saved.getValue().doubleValue();
-
-            if (value >= 1.0) {
-                eventService.addEvent(
-                        saved.getDetector().getStation(),
-                        "RADIATION_ALARM",
-                        saved.getDetector().getName() + " value is " + saved.getValue()
-                );
-            } else if (value >= 0.5) {
-                eventService.addEvent(
-                        saved.getDetector().getStation(),
-                        "RADIATION_WARNING",
-                        saved.getDetector().getName() + " value is " + saved.getValue()
-                );
-            }
-        }
-
-        return saved;
+    public Measurement create(@RequestBody MeasurementRequest request,
+                              @AuthenticationPrincipal DevicePrincipal device) {
+        return measurementService.record(request.detectorId(), request.value(), request.unit(),
+                request.messageId(), request.measuredAt(), device.stationId());
     }
 }

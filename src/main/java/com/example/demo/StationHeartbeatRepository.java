@@ -7,6 +7,7 @@ import java.util.List;
 public interface StationHeartbeatRepository extends JpaRepository<StationHeartbeat, Long> {
 
     Optional<StationHeartbeat> findTopByStationIdOrderByCreatedAtDesc(Long stationId);
+    Optional<StationHeartbeat> findByMessageId(String messageId);
 
-    List<StationHeartbeat> findAllByOrderByCreatedAtDesc();
+    List<StationHeartbeat> findTop100ByOrderByCreatedAtDesc();
 }
